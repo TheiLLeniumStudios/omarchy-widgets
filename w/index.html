@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Shared widget</title>
+<!--
+  Where a shared widget's link lands: https://simonschubert.github.io/omarchy-widgets/w#owl1.<data>,
+  or #dpaste.<id> for one too big for a QR code, uploaded to dpaste.com.
+  The data -- the widget file, raw DEFLATE, base64url -- is after the #, so it never reaches this server;
+  this page unpacks it in the browser, shows the file, and hands it to the launcher. The format is
+  Share.kt in omarchy-proot and `omarchy-widgets share` in omarchy-widgets-app.
+-->
+<style>
+  :root { --bg: #1a1b26; --fg: #c0caf5; --muted: #565f89; --accent: #7aa2f7; --red: #f7768e; --surface: #24283b; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f5f5f7; --fg: #24283b; --muted: #6b6f80; --accent: #2e5fd8; --red: #c4314b; --surface: #e6e7ed; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  main { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; font-weight: normal; margin: 0 0 4px; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .warn { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); padding: 10px 12px; margin: 16px 0; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+  a.button, button { font: inherit; color: var(--fg); background: none; border: 1px solid var(--muted); padding: 6px 14px; cursor: pointer; text-decoration: none; }
+  a.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  pre { background: var(--surface); padding: 12px; overflow-x: auto; font-size: 12px; margin: 8px 0 0; }
+  code { background: var(--surface); padding: 1px 4px; }
+  .hidden { display: none; }
+  p { margin: 8px 0; }
+  .muted { color: var(--muted); }
+  p button { font-size: 12px; padding: 2px 8px; }
+</style>
+</head>
+<body>
+<main>
+  <section id="error" class="hidden">
+    <h1>No widget here</h1>
+    <p id="why" class="muted"></p>
+    <p>A shared widget's link ends in <code>#owl1.…</code> or <code>#dpaste.…</code>. Try scanning the code again.</p>
+  </section>
+
+  <section id="widget" class="hidden">
+    <h1 id="name"></h1>
+    <div class="meta" id="info"></div>
+    <p id="description"></p>
+    <div class="warn">Only add it if you trust whoever sent it. It runs commands as you, with your files and the network. Read it first: the launcher lists every command before it adds it.</div>
+
+    <div class="actions">
+      <a class="button primary" id="open" href="#">Open in Omalauncher</a>
+      <button id="copy">Copy the file</button>
+      <a class="button" id="download" download>Download .owl</a>
+    </div>
+    <p class="muted" id="android-hint">On Android, the button opens the launcher. Don't have it? <a href="https://play.google.com/store/apps/details?id=dev.omalauncher" style="color: var(--accent)">Omalauncher on Google Play</a>.</p>
+    <p class="muted">On Omarchy, <button id="import">Copy the import command</button> and run it in a terminal: <code>omarchy-widgets import</code> comes with the <a href="https://github.com/SimonSchubert/omarchy-widgets-app" style="color: var(--accent)">Widgets app</a>.</p>
+
+    <pre id="source"></pre>
+    <p class="muted">Widgets are written in OWL: <a href="https://github.com/SimonSchubert/omarchy-widgets/blob/main/docs/LANGUAGE.md" style="color: var(--accent)">the language</a>, and <a href="https://github.com/SimonSchubert/omarchy-widgets" style="color: var(--accent)">the store</a> of reviewed ones.</p>
+  </section>
+</main>
+<script>
+  "use strict";
+  const MAX_BYTES = 256 * 1024;
+
+  function fail(why) {
+    document.getElementById("why").textContent = why;
+    document.getElementById("error").classList.remove("hidden");
+  }
+
+  function base64url(s) {
+    const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4);
+    const bin = atob(b64);
+    return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  }
+
+  // Raw DEFLATE, stopped past MAX_BYTES so a small link can't unpack into a huge page.
+  async function inflate(bytes) {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    const reader = stream.getReader();
+    const parts = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > MAX_BYTES) { reader.cancel(); throw new Error("the widget is over 256 KB"); }
+      parts.push(value);
+    }
+    return new TextDecoder("utf-8", { fatal: true }).decode(await new Blob(parts).arrayBuffer());
+  }
+
+  function meta(text, key) {
+    const m = text.match(new RegExp(key + ':\\s*"([^"]*)"'));
+    return m ? m[1] : "";
+  }
+
+  // A widget too big for one QR code, uploaded to dpaste.com by the launcher: the link holds only its id.
+  // dpaste doesn't let other sites read it, so this page hands the link on to the launcher.
+  function paste(id) {
+    document.title = "Shared widget";
+    document.getElementById("name").textContent = "A shared widget";
+    document.getElementById("info").textContent = "shared with you · on dpaste.com";
+    const view = document.createElement("a");
+    view.href = "https://dpaste.com/" + id;
+    view.textContent = "Read it on dpaste.com";
+    view.style.color = "var(--accent)";
+    document.getElementById("description").replaceChildren(view);
+    for (const id of ["copy", "download", "source"]) document.getElementById(id).classList.add("hidden");
+    importCommand("dpaste." + id);
+    openIn("dpaste." + id);
+    document.getElementById("widget").classList.remove("hidden");
+  }
+
+  // The launcher catches this link itself once Android trusts it for the domain; until then, and from
+  // any browser, an intent: link opens it, passing the data as an extra since it can't keep the fragment.
+  function openIn(data) {
+    const intent = "intent://simonschubert.github.io/omarchy-widgets/w#Intent;scheme=https;package=dev.omalauncher;" +
+      "S.widget=" + encodeURIComponent(data) + ";" +
+      "S.browser_fallback_url=" + encodeURIComponent("https://play.google.com/store/apps/details?id=dev.omalauncher") + ";end";
+    const android = /Android/i.test(navigator.userAgent);
+    const open = document.getElementById("open");
+    if (android) open.href = intent;
+    else {
+      open.classList.add("hidden");
+      document.getElementById("android-hint").textContent = "Scan the code with an Android phone to open it in Omalauncher.";
+    }
+  }
+
+  // The link in single quotes: base64url and dpaste ids have none, so the shell takes it whole.
+  function importCommand(data) {
+    document.getElementById("import").onclick = async (ev) => {
+      const cmd = "omarchy-widgets import 'https://simonschubert.github.io/omarchy-widgets/w#" + data + "'";
+      try { await navigator.clipboard.writeText(cmd); ev.target.textContent = "Copied"; } catch (e) { ev.target.textContent = "Can't copy here"; }
+    };
+  }
+
+  async function main() {
+    const p = location.hash.match(/^#dpaste\.([A-Za-z0-9]{4,16})$/);
+    if (p) return paste(p[1]);
+    const m = location.hash.match(/owl1\.([A-Za-z0-9_-]+)/);
+    if (!m) return fail("This link has no widget in it.");
+    let text;
+    try {
+      text = await inflate(base64url(m[1]));
+    } catch (e) {
+      return fail(e.message && e.message.includes("KB") ? e.message : "The link is damaged or cut short.");
+    }
+    const name = (text.match(/widget\s*"([^"]*)"/) || [])[1] || "A widget";
+    const size = (text.match(/^\s*size:\s*(\d+x\d+)/m) || [])[1];
+    const version = meta(text, "version");
+    document.title = name + " · shared widget";
+    document.getElementById("name").textContent = name;
+    document.getElementById("info").textContent = ["shared with you", version && "v" + version, size, (text.length / 1024).toFixed(1) + " KB"].filter(Boolean).join(" · ");
+    document.getElementById("description").textContent = meta(text, "description");
+    document.getElementById("source").textContent = text;
+
+    openIn("owl1." + m[1]);
+
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "widget";
+    const download = document.getElementById("download");
+    download.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    download.download = slug + ".owl";
+    importCommand("owl1." + m[1]);
+    document.getElementById("copy").onclick = async (ev) => {
+      try { await navigator.clipboard.writeText(text); ev.target.textContent = "Copied"; } catch (e) { ev.target.textContent = "Can't copy here"; }
+    };
+    document.getElementById("widget").classList.remove("hidden");
+  }
+
+  main();
+</script>
+</body>
+</html>

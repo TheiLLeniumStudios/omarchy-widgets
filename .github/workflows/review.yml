@@ -1,0 +1,76 @@
+name: review
+
+# Checks every widget a pull request adds or changes and writes a summary for
+# the reviewer: what it runs, what it installs, and anything that looks risky.
+#
+# pull_request_target, so a pull request can't bring its own copy of this check:
+# nothing from it is checked out or run, and the token stays read-only.
+on:
+  pull_request_target:
+    paths: ["widgets/**"]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    # Arch, so package names and file owners are checked against the real repositories.
+    container: archlinux:latest
+    steps:
+      - name: Tools
+        run: pacman -Syu --noconfirm --needed git jre-openjdk-headless >/dev/null
+
+      # The base branch as it is now: this workflow and tools/owl.jar are the reviewed
+      # ones, not the pull request's, and the newest, even for a branch made before
+      # them. The pull request's files are only read as data, by verify-pr.sh.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Review
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          LOGIN: ${{ github.event.pull_request.user.login }}
+          ROLE: ${{ github.event.pull_request.author_association }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          tools/verify-pr.sh "$PR" pr | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Packages
+        run: |
+          pacman -Fy --noconfirm >/dev/null
+          bad=0
+          while read -r f; do
+            f=pr/$f
+            java -jar tools/owl.jar programs "$f" > deps.txt
+            declared=$(awk '$1 == "pacman" { print $2 }' deps.txt)
+            echo "#### Packages for \`$f\`" >> "$GITHUB_STEP_SUMMARY"
+            for p in $declared; do
+              if pacman -Si "$p" >/dev/null 2>&1; then
+                echo "- ✅ $p" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "::error file=$f::package $p isn't in the Arch repositories"
+                echo "- ❌ $p isn't in the Arch repositories" >> "$GITHUB_STEP_SUMMARY"
+                bad=1
+              fi
+            done
+            # Programs whose package is neither declared nor part of a base system.
+            for prog in $(awk '$1 == "program" { print $2 }' deps.txt); do
+              owner=$(pacman -Fq "usr/bin/$prog" 2>/dev/null | head -1 | cut -d/ -f2)
+              if [ -z "$owner" ]; then
+                echo "- ⚠️ \`$prog\`: no Arch package provides it" >> "$GITHUB_STEP_SUMMARY"
+              elif ! echo "$declared" | grep -qx "$owner" && ! pacman -Qq "$owner" >/dev/null 2>&1; then
+                echo "- ⚠️ \`$prog\` comes from **$owner**, which isn't in requires" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            done
+          done < pr/owls.txt
+          exit $bad

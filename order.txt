@@ -1,0 +1,2 @@
+# The order of the store: these widget ids first, in this order; the rest by name;
+# the ids after "..." last. CI applies it when it builds index.json.
