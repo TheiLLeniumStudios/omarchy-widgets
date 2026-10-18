@@ -14,9 +14,16 @@ One Omalauncher tile for any number of AI subscriptions and API accounts:
 
 Tap the tile for the usage screen, then **accounts** to add, edit, reorder or
 remove accounts. An account is a provider plus a name, a key, and (for
-OpenRouter/DeepSeek) an optional second credential. Adding two Claude accounts
-means adding two entries with different `.credentials.json` paths; log the
-second one in with `CLAUDE_CONFIG_DIR=~/.claude-2 claude`.
+OpenRouter/DeepSeek) an optional second credential.
+
+For Claude, the key is a Claude Code `.credentials.json` path. Claude Code owns
+that login flow: in the account form, **log in** and **log in 2nd** start it in a
+terminal with `CLAUDE_CONFIG_DIR=$HOME/.claude` and `$HOME/.claude-2`, so the
+browser/terminal login writes the matching file. **default path** and
+**2nd path** fill the key field with the resulting path; a leading `~` is
+expanded by the fetcher. **agents** opens the launcher's agent installer if
+Claude Code is not installed. The widget cannot capture the OAuth callback
+itself, so it hands that step to Claude Code.
 
 Keys are kept in the launcher's saved widget state, not in this repository or
 the `.owl` file. They are written to a mode-0600 cache file only so the local

@@ -115,11 +115,18 @@ claude_item() {
   local key="$1" at="" rt="" exp="" sub="" body code newat err="" cred=""
   if [ -z "$key" ]; then
     cred="$HOME/.claude/.credentials.json"
-  elif [[ "$key" == */* || "$key" == *.json ]]; then
-    cred="$key"
   else
-    # A raw OAuth access token, with no file to refresh.
-    at="$key"
+    # The value comes from a file, so the shell never expanded a leading ~.
+    case $key in
+      "~/"*) key="$HOME/${key:2}" ;;
+      "~") key="$HOME" ;;
+    esac
+    if [ -r "$key" ] || [[ "$key" == */* || "$key" == *.json ]]; then
+      cred="$key"
+    else
+      # A raw OAuth access token, with no file to refresh.
+      at="$key"
+    fi
   fi
 
   if [ -n "$cred" ]; then

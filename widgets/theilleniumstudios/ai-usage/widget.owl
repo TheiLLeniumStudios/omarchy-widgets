@@ -5,7 +5,7 @@ widget "ai usage" {
   minSize: 4x3
   meta {
     description: "Any number of Claude, OpenCode Go, OpenRouter and DeepSeek logins in one tile: usage windows, spend and remaining credit. Add, edit and remove accounts on its accounts screen"
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "dev"
     owl: 12
@@ -393,7 +393,18 @@ widget "ai usage" {
             onChange: draftKey = value
           }
           if draftProvider == "claude" {
-            Text { text: "blank uses ~/.claude/.credentials.json. For a second login: CLAUDE_CONFIG_DIR=~/.claude-2 claude"; style: label; color: muted; maxLines: 2 }
+            Text { text: "Claude Code creates the file. Blank uses ~/.claude/.credentials.json. Use log in / log in 2nd for each account, then pick the matching path."; style: label; color: muted; maxLines: 3 }
+            Row {
+              gap: 6
+              Button { text: "log in"; color: accent; onTap: terminal("CLAUDE_CONFIG_DIR=$HOME/.claude claude") }
+              Button { text: "log in 2nd"; color: accent; onTap: terminal("CLAUDE_CONFIG_DIR=$HOME/.claude-2 claude") }
+              Button { text: "agents"; color: muted; onTap: launcher("agents") }
+            }
+            Row {
+              gap: 6
+              Button { text: "default path"; color: muted; onTap: draftKey = "" }
+              Button { text: "2nd path"; color: muted; onTap: draftKey = "~/.claude-2/.credentials.json" }
+            }
           }
           if draftProvider == "openrouter" || draftProvider == "deepseek" {
             Text { text: draftProvider == "openrouter" ? "management key (optional)" : "usage token (optional)"; style: label; color: muted }
