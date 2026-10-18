@@ -5,7 +5,7 @@ widget "ai usage" {
   minSize: 4x3
   meta {
     description: "Any number of Claude, OpenCode Go, OpenRouter and DeepSeek logins in one tile: usage windows, spend and remaining credit. Add, edit and remove accounts on its accounts screen"
-    version: "1.1"
+    version: "1.2"
     license: "MIT"
     category: "dev"
     owl: 12
@@ -33,8 +33,19 @@ widget "ai usage" {
 
   let d = (u != null && u.ok) ? u.out : null
   let list = d == null ? [] : (d.accounts ?? [])
-  let shown = take(list, max([1, (rows ?? 4) * 2]))
+  let tileW = tileWidth ?? 400
+  let tileH = tileHeight ?? 800
+  // One card per row on a phone; two columns only when the tile is very wide.
+  let tall = (rows ?? 4) >= 6
+  let twoCol = (cols ?? 6) >= 10 && tall
+  let maxRows = max([1, floor((tileH - 90) / (twoCol ? 200 : 130))])
+  let maxCards = tall ? (twoCol ? maxRows * 2 : maxRows) : max([1, (rows ?? 4) * 2])
+  let shown = take(list, maxCards)
   let more = len(list) - len(shown)
+  let cardRows = max([1, twoCol ? ceil(len(shown) / 2) : len(shown)])
+  let cardH = tall ? clamp((tileH - 90) / cardRows, 120, 220) : 0
+  let cardW = twoCol ? (tileW - 40) / 2 : tileW - 24
+  let errors = count(list, a => a.error != null)
   let updated = d == null ? null : (d.updated ?? null)
 
   component PctBar(label, pct, resets = null, now = 0, compact = false) {
@@ -58,6 +69,7 @@ widget "ai usage" {
 
   component AccountRow(a, now) {
     Column {
+      justify: center
       let p = get(a, a.provider) ?? {}
       let pct = a.provider == "claude"
         ? max((p.limits ?? []).map(l => l.pct ?? 0))
@@ -70,6 +82,7 @@ widget "ai usage" {
           ? (p.balance != null && p.balance <= 5)
           : false
       let tone = a.error != null ? red : ((pct >= 90 || low) ? red : pct >= 70 ? yellow : green)
+      let pcolor = a.provider == "claude" ? orange : a.provider == "opencode-go" ? green : a.provider == "openrouter" ? blue : magenta
       let bsym = p.currency == "CNY" ? "¥" : p.currency == "USD" ? "$" : ""
       let csym = (p.cost_currency ?? p.currency) == "CNY" ? "¥" : (p.cost_currency ?? p.currency) == "USD" ? "$" : ""
       Row {
@@ -87,7 +100,7 @@ widget "ai usage" {
             gap: 6
             align: center
             Text { text: a.name; style: small; weight: 1; maxLines: 1 }
-            Text { text: a.provider == "opencode-go" ? "opencode go" : a.provider; style: label; color: muted; maxLines: 1 }
+            Text { text: a.provider == "opencode-go" ? "opencode go" : a.provider; style: label; color: pcolor; maxLines: 1 }
             if pct > 0 {
               Text { text: "${round(pct)}%"; style: label; color: tone; width: 32; align: end; maxLines: 1 }
             }
@@ -130,6 +143,130 @@ widget "ai usage" {
             }
           }
         }
+      }
+    }
+  }
+
+  component AccountCard(a, now, h, w) {
+    Column {
+      let p = get(a, a.provider) ?? {}
+      let pct = a.provider == "claude"
+        ? max((p.limits ?? []).map(l => l.pct ?? 0))
+        : a.provider == "opencode-go"
+          ? max([p.rolling.pct ?? 0, p.weekly.pct ?? 0, p.monthly.pct ?? 0])
+          : 0
+      let low = a.provider == "openrouter"
+        ? (p.remaining != null && p.remaining <= 5)
+        : a.provider == "deepseek"
+          ? (p.balance != null && p.balance <= 5)
+          : false
+      let tone = a.error != null ? red : ((pct >= 90 || low) ? red : pct >= 70 ? yellow : green)
+      let pcolor = a.provider == "claude" ? orange : a.provider == "opencode-go" ? green : a.provider == "openrouter" ? blue : magenta
+      let dial = clamp(h * 0.5, 56, 120)
+      let bsym = p.currency == "CNY" ? "¥" : p.currency == "USD" ? "$" : ""
+      let csym = (p.cost_currency ?? p.currency) == "CNY" ? "¥" : (p.cost_currency ?? p.currency) == "USD" ? "$" : ""
+      let amount = a.provider == "openrouter"
+        ? (p.remaining == null ? "—" : "$" + fixed(p.remaining, 2))
+        : (p.balance == null ? "…" : bsym + fixed(p.balance, 2))
+      let maxLimits = h < 170 ? 2 : 4
+      let detailW = max([120, w - 24 - dial - 14])
+      width: w
+      height: h
+      gap: 8
+      padding: 12
+      border: 1
+      borderColor: alpha(border, 0.55)
+      radius: 10 * corners
+      clip: true
+      Row {
+        gap: 8
+        align: center
+        fill: width
+        Spacer { width: 8; height: 8; radius: 4; background: tone }
+        Text { text: a.name; style: body; weight: 1; maxLines: 1 }
+        Text { text: a.provider == "opencode-go" ? "opencode go" : a.provider; style: label; color: pcolor; maxLines: 1 }
+      }
+      if a.error != null {
+        Text { text: a.error; style: small; color: red; maxLines: 2; weight: 1 }
+      } else {
+        Row {
+          gap: 14
+          align: center
+          weight: 1
+          fill: width
+          if a.provider == "claude" || a.provider == "opencode-go" {
+            Box {
+              width: dial
+              height: dial
+              align: center
+              Ring {
+                size: dial
+                value: clamp(pct, 0, 100) / 100
+                color: tone
+                track: alpha(border, 0.4)
+                thickness: max([6, dial * 0.08])
+                start: 225
+                sweep: 270
+                animate value: spring()
+              }
+              Text { text: "${round(pct)}%"; fontSize: dial * 0.24; color: tone; align: center; width: dial }
+            }
+          } else {
+            Column {
+              gap: 0
+              width: dial
+              Text { text: amount; fontSize: clamp(dial * 0.28, 18, 38); color: tone; maxLines: 1 }
+              Text { text: "left"; style: label; color: muted }
+            }
+          }
+          Column {
+            gap: 6
+            width: detailW
+            if a.provider == "claude" {
+              Text { text: p.plan == null ? "claude code" : "plan ${p.plan}"; style: label; color: muted }
+              for l in take(p.limits ?? [], maxLimits) key l.label {
+                PctBar { label: l.label; pct: l.pct; resets: l.resets; now: now }
+              }
+            } else if a.provider == "opencode-go" {
+              Text { text: "status ${p.status ?? "…"}"; style: label; color: muted }
+              for l in [
+                {label: "5h", pct: p.rolling.pct, resets: p.rolling.resets},
+                {label: "week", pct: p.weekly.pct, resets: p.weekly.resets},
+                {label: "month", pct: p.monthly.pct, resets: p.monthly.resets}
+              ] key l.label {
+                PctBar { label: l.label; pct: l.pct; resets: l.resets; now: now }
+              }
+            } else if a.provider == "openrouter" {
+              Text { text: "today $" + fixed(p.today ?? 0, 2) + " · month $" + fixed(p.month ?? 0, 2); style: small; color: muted; maxLines: 1 }
+              Text { text: "key usage $" + fixed(p.usage ?? 0, 2) + (p.limit == null ? "" : " of $" + fixed(p.limit, 2)); style: small; color: muted; maxLines: 1 }
+              Text { text: "status ${p.status ?? "…"}"; style: label; color: muted }
+            } else if a.provider == "deepseek" {
+              Text { text: (p.estimated ? "est. " : "") + "today " + csym + fixed(p.today ?? 0, 2) + " · month " + csym + fixed(p.month ?? 0, 2); style: small; color: muted; maxLines: 2 }
+              Text { text: p.available ? "available" : "not available"; style: label; color: p.available ? green : yellow }
+              if p.today_tokens != null {
+                Text { text: "${fmtNum(p.today_tokens)} tokens today"; style: label; color: muted }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  component AddAccountButton() {
+    Button {
+      text: "add an account"
+      color: accent
+      onTap: {
+        view = "config"
+        formOpen = true
+        editing = ""
+        draftProvider = "claude"
+        draftName = ""
+        draftKey = ""
+        draftExtra = ""
+        formError = ""
+        screen()
       }
     }
   }
@@ -450,12 +587,20 @@ widget "ai usage" {
     Row {
       gap: 8
       align: center
-      Text { text: "ai usage"; style: label; color: accent; weight: 1 }
-      if u != null && !u.ok {
+      fill: width
+      Text { text: "ai usage"; style: label; color: accent }
+      if len(list) > 0 {
+        Text { text: "${len(list)} account${len(list) == 1 ? "" : "s"}"; style: label; color: muted }
+      }
+      Spacer { weight: 1 }
+      if errors > 0 {
+        Text { text: "${errors} error${errors == 1 ? "" : "s"}"; style: label; color: red }
+      } else if u != null && !u.ok {
         Text { text: "fetch failed"; style: label; color: red }
-      } else if updated != null {
+      }
+      if updated != null {
         Text { text: "updated ${fmtAgo(updated, now)}"; style: label; color: muted }
-      } else {
+      } else if u == null {
         Text { text: "loading…"; style: label; color: muted }
       }
       Text {
@@ -474,26 +619,52 @@ widget "ai usage" {
       }
     } else if len(list) == 0 {
       Column {
-        gap: 8
+        gap: 12
         weight: 1
         align: center
         justify: center
-        Text { text: "no accounts yet"; style: body; color: muted }
-        Text { text: "add any number of Claude, OpenCode Go, OpenRouter or DeepSeek logins"; style: label; color: muted; align: center }
-        Button {
-          text: "add an account"
-          color: accent
-          onTap: {
-            view = "config"
-            formOpen = true
-            editing = ""
-            draftProvider = "claude"
-            draftName = ""
-            draftKey = ""
-            draftExtra = ""
-            formError = ""
-            screen()
+        if (rows ?? 4) < 4 {
+          Text { text: "no accounts yet"; style: body; color: muted }
+          Text { text: "add any number of Claude, OpenCode Go, OpenRouter or DeepSeek logins"; style: label; color: muted; align: center }
+          AddAccountButton { }
+        } else {
+          Column {
+            gap: 10
+            padding: 20
+            width: min([460, tileW - 24])
+            border: 1
+            borderColor: alpha(border, 0.4)
+            radius: 14 * corners
+            align: center
+            Text { text: "no accounts yet"; style: title; color: foreground }
+            Text { text: "Add any number of Claude, OpenCode Go, OpenRouter or DeepSeek logins."; style: small; color: muted; align: center }
+            Flow {
+              gap: 6
+              align: center
+              Text { text: "claude"; style: label; color: orange; padding: [4, 7]; border: 1; borderColor: alpha(orange, 0.4); radius: 6 * corners }
+              Text { text: "opencode go"; style: label; color: green; padding: [4, 7]; border: 1; borderColor: alpha(green, 0.4); radius: 6 * corners }
+              Text { text: "openrouter"; style: label; color: blue; padding: [4, 7]; border: 1; borderColor: alpha(blue, 0.4); radius: 6 * corners }
+              Text { text: "deepseek"; style: label; color: magenta; padding: [4, 7]; border: 1; borderColor: alpha(magenta, 0.4); radius: 6 * corners }
+            }
+            AddAccountButton { }
           }
+        }
+      }
+    } else if tall {
+      Column {
+        gap: 6
+        weight: 1
+        clip: true
+        Grid {
+          columns: twoCol ? 2 : 1
+          gap: 8
+          fill: width
+          for a in shown key a.id {
+            AccountCard { a: a; now: now; h: cardH; w: cardW }
+          }
+        }
+        if more > 0 {
+          Text { text: "+${more} more · tap for all"; style: label; color: muted; align: center }
         }
       }
     } else {
@@ -502,10 +673,12 @@ widget "ai usage" {
         weight: 1
         clip: true
         for a in shown key a.id {
-          AccountRow { a: a; now: now }
+          AccountRow { a: a; now: now; weight: 1 }
         }
         if more > 0 {
           Text { text: "+${more} more · tap for all"; style: label; color: muted; align: center }
+        } else {
+          Text { text: "tap for details"; style: label; color: muted; align: center }
         }
       }
     }
